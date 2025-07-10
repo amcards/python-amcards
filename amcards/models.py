@@ -19,6 +19,7 @@ class User:
         phone: str,
         date_joined: datetime,
         address_line_1: str,
+        address_line_2: str,
         city: str,
         state: str,
         postal_code: str,
@@ -36,6 +37,7 @@ class User:
         self._phone = phone
         self._date_joined = date_joined
         self._address_line_1 = address_line_1
+        self._address_line_2 = address_line_2
         self._city = city
         self._state = state
         self._postal_code = postal_code
@@ -89,8 +91,13 @@ class User:
         return self._address_line_1
 
     @property
+    def address_line_2(self) -> str:
+        """Secondary address line of user."""
+        return self._address_line_2
+
+    @property
     def city(self) -> str:
-        """User's state."""
+        """User's city."""
         return self._city
 
     @property
@@ -142,6 +149,7 @@ class User:
             phone=json['phone'],
             date_joined=helpers.to_datetime(json['date_joined']),
             address_line_1=json['address_line_1'],
+            address_line_2=json.get('address_line_2', ''),
             city=json['city'],
             state=json['state'],
             postal_code=json['postal'],
