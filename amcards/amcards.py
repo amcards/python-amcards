@@ -2,7 +2,7 @@ import requests
 from typing import List, Optional, Callable, Any
 
 
-from .models import User, Template, Gift, Campaign, CardResponse, CardsResponse, CampaignResponse, Card, Contact, Mailing, CreditTransaction
+from .models import User, Template, Gift, Campaign, CardResponse, CardsResponse, CampaignResponse, CampaignMultiResponse, Card, Contact, Mailing, CreditTransaction
 from . import exceptions
 from . import __helpers as helpers
 
@@ -1058,6 +1058,136 @@ class AMcardsClient:
         return CampaignResponse._from_json(res_json | {
             'shipping_address': shipping_address,
         })
+
+    def send_campaign_multi(
+        self,
+        campaign_id: str | int,
+        initiator: str,
+        contacts: List[dict],
+    ) -> CampaignMultiResponse:
+        """Attempt to send a drip campaign to multiple contacts.
+
+            .. code-block::
+
+                >>> from amcards import AMcardsClient
+                >>> client = AMcardsClient('youraccesstoken')
+                >>> res = client.send_campaign_multi(
+                ...     campaign_id='123',
+                ...     initiator='myintegration123',
+                ...     contacts=[
+                ...         {
+                ...             'first_name': 'Ralph',
+                ...             'last_name': 'Mullins',
+                ...             'address_line_1': '2285 Reppert Road',
+                ...             'city': 'Southfield',
+                ...             'state': 'MI',
+                ...             'postal_code': '48075',
+                ...             'country': 'US'
+                ...         },
+                ...         {
+                ...             'first_name': 'Keith',
+                ...             'last_name': 'May',
+                ...             'address_line_1': '364 Spruce Drive',
+                ...             'city': 'Philadelphia',
+                ...             'state': 'PA',
+                ...             'postal_code': '19107',
+                ...             'country': 'US'
+                ...         }
+                ...     ]
+                ... )
+                >>> res.mailing_id
+                29695
+                >>> res.contacts_scheduled_count
+                2
+                >>> res.duplicate_contacts_count
+                0
+                >>> res.message
+                'Cards scheduled successfully. Debited $8.84 credits. This may take a few minutes to complete.'
+
+        :param str or int campaign_id: Unique id for the :py:class:`drip campaign <amcards.models.Campaign>` you are sending.
+        :param str initiator: Unique identifier of client's user so if multiple users use a single AMcards.com account, a drip campaign can be identified per person.
+        :param List[dict] contacts: List of contact details. Here's an example how the list might look, make sure you include all of the `required` keys for each dict in the list:
+
+            .. code-block::
+
+                [
+                    {
+                        'first_name': 'Ralph',
+                        'last_name': 'Mullins',
+                        'address_line_1': '2285 Reppert Road',
+                        'city': 'Southfield',
+                        'state': 'MI',
+                        'postal_code': '48075',
+                        'country': 'US',
+                        'organization': 'Google',                 # OPTIONAL
+                        'phone_number': '15556667777',            # OPTIONAL
+                        'birth_date': '2003-12-25',               # OPTIONAL
+                        'anniversary_date': '2022-10-31',         # OPTIONAL
+                        'third_party_contact_id': 'crmid1453131', # OPTIONAL
+                        'address_line_2': 'Apt 2'                 # OPTIONAL
+                        'extra_data': {                           # OPTIONAL
+                            'carMake': 'Honda',                   # OPTIONAL
+                        }                                         # OPTIONAL
+                    },
+                ]
+
+        :return: AMcards' :py:class:`response <amcards.models.CampaignMultiResponse>` for sending a drip campaign to multiple contacts.
+        :rtype: :py:class:`CampaignMultiResponse <amcards.models.CampaignMultiResponse>`
+
+        :raises CampaignMultiSendError: When something goes wrong when attempting to send a drip campaign.
+        :raises AuthenticationError: When the client's ``access_token`` is invalid.
+        :raises ShippingAddressError: When ``contacts`` is missing some `required` keys.
+        :raises DateFormatError: When one of the dates provided is not in ``"YYYY-MM-DD"`` format.
+        :raises PhoneFormatError: When the ``phone_number`` is not a digit string of length 10.
+        :raises InsufficientCreditsError: When the client's user has insufficient credits in their balance.
+
+        """
+        # Validate contacts
+        for idx, contact in enumerate(contacts):
+            missings = helpers.get_missing_required_shipping_address_fields(contact)
+            if missings:
+                error_message = f'Missing the following required shipping address fields at contacts[{idx}]: ' + ', '.join(missings)
+                raise exceptions.ShippingAddressError(error_message)
+
+        # Sanitize contacts
+        contacts = [helpers.sanitize_contact_for_campaign_multi_send(contact) for contact in contacts]
+
+        for idx, contact in enumerate(contacts):
+            # Validate birth_date
+            if 'birth_date' in contact and not helpers.is_valid_birthdate(contact['birth_date']):
+                error_message = f'Invalid birth_date format of "{contact["birth_date"]}" for contact at contacts[{idx}], please specify date as "YYYY-MM-DD", or omit it'
+                raise exceptions.DateFormatError(error_message)
+            # Validate anniversary_date
+            if 'anniversary_date' in contact and not helpers.is_valid_date(contact['anniversary_date']):
+                error_message = f'Invalid anniversary_date format of "{contact["anniversary_date"]}" for contact at contacts[{idx}], please specify date as "YYYY-MM-DD", or omit it'
+                raise exceptions.DateFormatError(error_message)
+            # Validate phone_number
+            if 'phone_number' in contact and not helpers.is_valid_phone(contact['phone_number']):
+                error_message = f'Invalid phone_number format of "{contact["phone_number"]}" for contact at contacts[{idx}], please specify phone as a 10 number string with no special formatting (ex. 15556667777), or omit it'
+                raise exceptions.PhoneFormatError(error_message)
+            if 'extra_data' in contact:
+                contact['extra_data'] = helpers.sanitize_extra_data(contact['extra_data'])
+
+        # Build request json payload
+        body = {
+            'campaign_id': campaign_id,
+            'initiator': initiator,
+            'contacts': contacts,
+        }
+
+        res = requests.post(f'{DOMAIN}/campaigns/open-campaign-multi-form/', json=body, headers=self._HEADERS)
+
+        # Check for errors
+        match res.status_code:
+            case 400:
+                raise exceptions.CampaignMultiSendError('Something went wrong when attempting to send a drip campaign')
+            case 401:
+                raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
+            case 402:
+                raise exceptions.InsufficientCreditsError('Clients\' user has insufficient credits, no cards were scheduled')
+
+        res_json = res.json()
+        return CampaignMultiResponse._from_json(res_json)
 
     def send_cards(
         self,

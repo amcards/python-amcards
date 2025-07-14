@@ -11,6 +11,26 @@ REQUIRED_SHIPPING_ADDRESS_FIELDS = {
     'postal_code',
 }
 
+REQUIRED_CONTACT_FIELDS = {
+    'first_name',
+    'last_name',
+    'address_line_1',
+    'city',
+    'state',
+    'postal_code',
+}
+
+OPTIONAL_CONTACT_FIELDS = {
+    'country',
+    'organization',
+    'phone_number',
+    'birth_date',
+    'anniversary_date',
+    'third_party_contact_id',
+    'address_line_2',
+    'extra_data',
+}
+
 CARD_OPTIONAL_SHIPPING_ADDRESS_FIELDS = {
     'country',
     'organization',
@@ -121,6 +141,13 @@ def sanitize_shipping_address_for_campaign_send(shipping_address: dict) -> dict:
         if not shipping_address.get(optional): continue
         sanitized_shipping_address[optional] = shipping_address[optional]
     return sanitized_shipping_address
+
+def sanitize_contact_for_campaign_multi_send(contact: dict) -> dict:
+    sanitized_contact = {field: contact[field] for field in REQUIRED_CONTACT_FIELDS}
+    for optional in OPTIONAL_CONTACT_FIELDS:
+        if not contact.get(optional): continue
+        sanitized_contact[optional] = contact[optional]
+    return sanitized_contact
 
 def sanitize_return_address(return_address: dict) -> dict:
     sanitized_return_address = {}
