@@ -51,5 +51,8 @@ class CardsSendError(AMcardsException):
 class CampaignSendError(AMcardsException):
     """Something went wrong when attempting to send a drip campaign"""
 
+class CampaignMultiSendError(AMcardsException):
+    """Something went wrong when attempting to send a drip campaign to multiple contacts"""
+
 class OAuthTokenRefreshError(AMcardsException):
     """Something went wrong when attempting to refresh AMcards access_token"""
