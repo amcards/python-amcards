@@ -279,6 +279,7 @@ class Campaign:
         send_if_duplicate: bool,
         has_anniversary_drip: bool = False,
         has_birthday_drip: bool = False,
+        total_cost: int = 0,
     ) -> None:
         self._id = id
         self._name = name
@@ -286,6 +287,7 @@ class Campaign:
         self._send_if_duplicate = send_if_duplicate
         self._has_anniversary_drip = has_anniversary_drip
         self._has_birthday_drip = has_birthday_drip
+        self._total_cost = total_cost
 
     __repr__ = helpers.repr
 
@@ -319,6 +321,11 @@ class Campaign:
         """True if one of more drips in this campaign are birthday drips. False otherwise."""
         return self._has_birthday_drip
 
+    @property
+    def total_cost(self) -> int:
+        """Drip campaign's total cost in `cents`."""
+        return self._total_cost
+
     @classmethod
     def _from_json(cls, json: dict):
         return cls(
@@ -328,6 +335,7 @@ class Campaign:
             send_if_duplicate=json['send_even_if_duplicate'],
             has_anniversary_drip=json['has_anniversary_drip'],
             has_birthday_drip=json['has_birthday_drip'],
+            total_cost=json['campaign_cost'],
         )
 
 class CardStatus(Enum):
