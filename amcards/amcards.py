@@ -1124,7 +1124,7 @@ class AMcardsClient:
                         'birth_date': '2003-12-25',               # OPTIONAL
                         'anniversary_date': '2022-10-31',         # OPTIONAL
                         'third_party_contact_id': 'crmid1453131', # OPTIONAL
-                        'address_line_2': 'Apt 2'                 # OPTIONAL
+                        'address_line_2': 'Apt 2',                # OPTIONAL
                         'extra_data': {                           # OPTIONAL
                             'carMake': 'Honda',                   # OPTIONAL
                         }                                         # OPTIONAL
@@ -1136,43 +1136,44 @@ class AMcardsClient:
 
         :raises CampaignMultiSendError: When something goes wrong when attempting to send a drip campaign.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
-        :raises ShippingAddressError: When ``contacts`` is missing some `required` keys.
-        :raises DateFormatError: When one of the dates provided is not in ``"YYYY-MM-DD"`` format.
-        :raises PhoneFormatError: When the ``phone_number`` is not a digit string of length 10.
+        :raises ShippingAddressError: When none of the provided contacts are valid after validation. Contacts missing required fields or with invalid optional fields are skipped.
         :raises InsufficientCreditsError: When the client's user has insufficient credits in their balance.
 
         """
+        contacts_to_send = []
+
         # Validate contacts
-        for idx, contact in enumerate(contacts):
+        for contact in enumerate(contacts):
             missings = helpers.get_missing_required_shipping_address_fields(contact)
-            if missings:
-                error_message = f'Missing the following required shipping address fields at contacts[{idx}]: ' + ', '.join(missings)
-                raise exceptions.ShippingAddressError(error_message)
+            if not missings:
+                contacts_to_send.append(contact)
 
         # Sanitize contacts
-        contacts = [helpers.sanitize_contact_for_campaign_multi_send(contact) for contact in contacts]
+        contacts_to_send = [helpers.sanitize_contact_for_campaign_multi_send(contact) for contact in contacts_to_send]
 
-        for idx, contact in enumerate(contacts):
+        valid_contacts = []
+        for contact in contacts_to_send:
             # Validate birth_date
             if 'birth_date' in contact and not helpers.is_valid_birthdate(contact['birth_date']):
-                error_message = f'Invalid birth_date format of "{contact["birth_date"]}" for contact at contacts[{idx}], please specify date as "YYYY-MM-DD", or omit it'
-                raise exceptions.DateFormatError(error_message)
+                continue
             # Validate anniversary_date
             if 'anniversary_date' in contact and not helpers.is_valid_date(contact['anniversary_date']):
-                error_message = f'Invalid anniversary_date format of "{contact["anniversary_date"]}" for contact at contacts[{idx}], please specify date as "YYYY-MM-DD", or omit it'
-                raise exceptions.DateFormatError(error_message)
+                continue
             # Validate phone_number
             if 'phone_number' in contact and not helpers.is_valid_phone(contact['phone_number']):
-                error_message = f'Invalid phone_number format of "{contact["phone_number"]}" for contact at contacts[{idx}], please specify phone as a 10 number string with no special formatting (ex. 15556667777), or omit it'
-                raise exceptions.PhoneFormatError(error_message)
+                continue
             if 'extra_data' in contact:
                 contact['extra_data'] = helpers.sanitize_extra_data(contact['extra_data'])
+            valid_contacts.append(contact)
+
+        if not valid_contacts:
+            raise exceptions.ShippingAddressError('No valid contacts to send')
 
         # Build request json payload
         body = {
             'campaign_id': campaign_id,
             'initiator': initiator,
-            'contacts': contacts,
+            'contacts': valid_contacts,
         }
 
         res = requests.post(f'{DOMAIN}/campaigns/open-campaign-multi-form/', json=body, headers=self._HEADERS)
