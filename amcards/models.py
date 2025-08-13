@@ -883,11 +883,13 @@ class CampaignMultiResponse:
         mailing_id: int,
         contacts_scheduled_count: int,
         duplicate_contacts_count: int,
+        contacts_scheduled_third_party_contact_ids: List[str],
         message: str,
     ) -> None:
         self._mailing_id = mailing_id
         self._contacts_scheduled_count = contacts_scheduled_count
         self._duplicate_contacts_count = duplicate_contacts_count
+        self._contacts_scheduled_third_party_contact_ids = contacts_scheduled_third_party_contact_ids
         self._message = message
 
     __repr__ = helpers.repr
@@ -913,6 +915,11 @@ class CampaignMultiResponse:
         return self._duplicate_contacts_count
 
     @property
+    def contacts_scheduled_third_party_contact_ids(self) -> List[str]:
+        """List of third party contact ids that were scheduled for the drip campaign."""
+        return self._contacts_scheduled_third_party_contact_ids
+
+    @property
     def message(self) -> str:
         """Represents AMcards' response message for sending a drip campaign to multiple contacts."""
         return self._message
@@ -923,6 +930,7 @@ class CampaignMultiResponse:
             mailing_id=json['mailing_id'],
             contacts_scheduled_count=json['contacts_scheduled_count'],
             duplicate_contacts_count=json['duplicate_contacts_count'],
+            contacts_scheduled_third_party_contact_ids=json['contacts_scheduled_third_party_contact_ids'],
             message=json['message'],
         )
 
