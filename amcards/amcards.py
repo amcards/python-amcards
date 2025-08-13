@@ -1143,7 +1143,7 @@ class AMcardsClient:
         contacts_to_send = []
 
         # Validate contacts
-        for contact in enumerate(contacts):
+        for contact in contacts:
             missings = helpers.get_missing_required_shipping_address_fields(contact)
             if not missings:
                 contacts_to_send.append(contact)
