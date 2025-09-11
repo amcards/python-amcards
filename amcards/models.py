@@ -361,6 +361,7 @@ class Card:
         self,
         id: int,
         amount_charged: int,
+        total_amount_charged: int,
         status: CardStatus,
         initiator: str,
         send_date: str,
@@ -378,6 +379,7 @@ class Card:
     ) -> None:
         self._id = id
         self._amount_charged = amount_charged
+        self._total_amount_charged = total_amount_charged
         self._status = status
         self._initiator = initiator
         self._send_date = send_date
@@ -402,8 +404,13 @@ class Card:
 
     @property
     def amount_charged(self) -> int:
-        """Total amount charged to client's user in `cents`."""
+        """Total amount charged to client's user in `cents` not including attached gift prices."""
         return self._amount_charged
+
+    @property
+    def total_amount_charged(self) -> int:
+        """Total amount charged on the card in `cents` including attached gift prices."""
+        return self._total_amount_charged
 
     @property
     def status(self) -> CardStatus:
@@ -522,6 +529,7 @@ class Card:
         return cls(
             id=json['id'],
             amount_charged=int(json['amount_charged'] * 100),
+            total_amount_charged=json.get('total_amount_charged_cents', 0),
             status=CardStatus(json['status']),
             initiator=json['initiator'],
             send_date=json['send_date'],
