@@ -902,6 +902,7 @@ class AMcardsClient:
         return_address: dict = None,
         send_date: str = None,
         extra_data: dict = None,
+        bypass_duplicate_check: bool = False,
     ) -> CampaignResponse:
         """Attempt to send a drip campaign.
 
@@ -978,6 +979,7 @@ class AMcardsClient:
                     'carMake': 'Honda',                      # OPTIONAL
                 }
 
+        :param bool bypass_duplicate_check: When ``True``, instruct AMcards to bypass duplicate detection for the campaign send; defaults to ``False``.
         :return: AMcards' :py:class:`response <amcards.models.CampaignResponse>` for sending a single drip campaign.
         :rtype: :py:class:`CampaignResponse <amcards.models.CampaignResponse>`
 
@@ -1038,6 +1040,9 @@ class AMcardsClient:
 
         if extra_data is not None:
             body |= {'extra_data': extra_data}
+
+        if bypass_duplicate_check:
+            body |= {'bypass_duplicate_check': True}
 
         res = requests.post(f'{DOMAIN}/campaigns/open-campaign-form/', json=body, headers=self._HEADERS)
 
