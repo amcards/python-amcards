@@ -888,7 +888,7 @@ class CampaignMultiResponse:
     """Represents AMcards' response for sending a drip campaign to multiple contacts."""
     def __init__(
         self,
-        mailing_id: int,
+        mailing_id: Optional[int],
         contacts_scheduled_count: int,
         duplicate_contacts_count: int,
         contacts_scheduled_third_party_contact_ids: List[str],
@@ -903,13 +903,15 @@ class CampaignMultiResponse:
     __repr__ = helpers.repr
 
     @property
-    def mailing_id(self) -> int:
-        """Unique id for the :py:class:`mailing <amcards.models.Mailing>` created."""
+    def mailing_id(self) -> Optional[int]:
+        """Unique id for the :py:class:`mailing <amcards.models.Mailing>` created, if returned."""
         return self._mailing_id
 
     @property
-    def mailing_link(self) -> str:
-        """This is the link to the mailing list inside of AMcards.com."""
+    def mailing_link(self) -> Optional[str]:
+        """This is the link to the mailing list inside of AMcards.com, if available."""
+        if self._mailing_id is None:
+            return None
         return f'https://amcards.com/cards/history/?mailing={self._mailing_id}'
 
     @property
@@ -934,8 +936,9 @@ class CampaignMultiResponse:
 
     @classmethod
     def _from_json(cls, json: dict):
+        mailing_id = json.get('mailing_id')
         return cls(
-            mailing_id=json['mailing_id'],
+            mailing_id=int(mailing_id) if mailing_id is not None else None,
             contacts_scheduled_count=json['contacts_scheduled_count'],
             duplicate_contacts_count=json['duplicate_contacts_count'],
             contacts_scheduled_third_party_contact_ids=json['contacts_scheduled_third_party_contact_ids'],
