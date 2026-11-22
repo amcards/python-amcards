@@ -8,6 +8,7 @@ from . import __helpers as helpers
 
 
 DOMAIN = 'https://amcards.com'
+Timeout = Optional[float | tuple[float, float]]
 
 FIXED_COUNTRY = {
     # US fixes
@@ -19,7 +20,7 @@ FIXED_COUNTRY = {
 
 class AMcardsClient:
     """Client for AMcards API."""
-    def __init__(self, access_token: str, oauth_config: Optional[dict] = None, callback: Optional[Callable[[str, str, int], Any]] = None) -> None:
+    def __init__(self, access_token: str, oauth_config: Optional[dict] = None, callback: Optional[Callable[[str, str, int], Any]] = None, *, timeout: Timeout = None) -> None:
         """Client for AMcards API.
 
         :param str access_token: Your AMcards access token. Generate one `here <https://amcards.com/user/generate-access-token/>`_.
@@ -36,15 +37,27 @@ class AMcardsClient:
 
         :param Optional[Callable[[str, str, int], Any]] callback: This function will be called by the client when you have ``oauth_config`` defined, and the client refreshes the ``access_token`` before making a request. This can be useful when you need perform some logic when the client refreshes the specified ``access_token`` (like updating your database to reflect the new access_token and refresh_token). ``callback`` is optional, but if you choose to include it, it needs to accept the following keyword arguments: ``access_token`` ``refresh_token`` ``expiration``. ``callback`` will be called by the client as follows: ``callback(access_token='newaccesstoken', refresh_token='newrefreshtoken', expiration=1671692135130)``, note that ``expiration`` is specified as a unix timestamp in ms.
 
+        :param timeout: Timeout in seconds for every HTTP request, including OAuth refresh. Use a number for both connect/read timeouts, or a ``(connect, read)`` tuple. Defaults to ``None`` (no timeout). This is not a total operation deadline.
+
         """
         self._access_token = access_token
         self._oauth_config = oauth_config
         self._callback = callback
+        self._timeout = timeout
+
+    def _request(self, method: str, url: str, *, timeout: Timeout = None, authenticated: bool = True, **kwargs) -> requests.Response:
+        """Use the same timeout policy for all API calls and token refreshes."""
+        timeout = self._timeout if timeout is None else timeout
+        if authenticated:
+            if self._token_expired():
+                self._refresh_token(timeout=timeout)
+            kwargs['headers'] = {'Authorization': f'Bearer {self._access_token}'}
+        return requests.request(method, url, timeout=timeout, **kwargs)
 
     def _token_expired(self) -> bool:
         return self._oauth_config is not None and helpers.current_timestamp() >= self._oauth_config['expiration']
 
-    def _refresh_token(self) -> None:
+    def _refresh_token(self, *, timeout: Timeout = None) -> None:
         # Refresh the tokens
         payload = {
             'grant_type': 'refresh_token',
@@ -52,7 +65,7 @@ class AMcardsClient:
             'client_id': self._oauth_config['client_id'],
             'client_secret': self._oauth_config['client_secret'],
         }
-        res = requests.post(url=f'{DOMAIN}/oauth2/token/', data=payload)
+        res = self._request('POST', url=f'{DOMAIN}/oauth2/token/', data=payload, timeout=timeout, authenticated=False)
 
         # Make sure the refresh was successful
         if not res.ok:
@@ -81,7 +94,7 @@ class AMcardsClient:
             'Authorization': f'Bearer {self._access_token}',
         }
 
-    def user(self) -> User:
+    def user(self, *, timeout: Timeout = None) -> User:
         """Fetches client's AMcards user.
 
         :return: The client's :py:class:`user <amcards.models.User>`.
@@ -89,15 +102,17 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/user/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/user/', timeout=timeout)
         if not res.ok:
             raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
 
         user_json = res.json().get('objects', [{}])[0]
         return User._from_json(user_json)
 
-    def credit_transactions(self, limit: int = 25, skip: int = 0, filters: dict = None) -> List[CreditTransaction]:
+    def credit_transactions(self, limit: int = 25, skip: int = 0, filters: dict = None, *, timeout: Timeout = None) -> List[CreditTransaction]:
         """Fetches client's AMcards credit transactions.
 
         :param int limit: Defaults to ``25``. Max number of credit transactions to be fetched.
@@ -111,13 +126,15 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         params = {
             'limit': limit,
             'offset': skip,
         } | (filters or {})
 
-        res = requests.get(url=f'{DOMAIN}/.api/v1/credittransaction/', headers=self._HEADERS, params=params)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/credittransaction/', params=params, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -126,7 +143,7 @@ class AMcardsClient:
         credit_transactions_json = res.json().get('objects', [])
         return [CreditTransaction._from_json(credit_transaction_json) for credit_transaction_json in credit_transactions_json]
 
-    def credit_transaction_count(self, filters: dict = None) -> int:
+    def credit_transaction_count(self, filters: dict = None, *, timeout: Timeout = None) -> int:
         """Fetches count of client's AMcards credit transactions.
 
         :param Optional[dict] filters: Defaults to ``None``. Filters to be applied when counting credit transactions.
@@ -138,12 +155,14 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         params = {
             'limit': 1,
         } | (filters or {})
 
-        res = requests.get(url=f'{DOMAIN}/.api/v1/credittransaction/', headers=self._HEADERS, params=params)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/credittransaction/', params=params, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -151,7 +170,7 @@ class AMcardsClient:
 
         return res.json()['meta']['total_count']
 
-    def templates(self, limit: int = 25, skip: int = 0) -> List[Template]:
+    def templates(self, limit: int = 25, skip: int = 0, *, timeout: Timeout = None) -> List[Template]:
         """Fetches client's AMcards templates.
 
         :param int limit: Defaults to ``25``. Max number of templates to be fetched.
@@ -162,8 +181,10 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/template/', headers=self._HEADERS, params={'limit': limit, 'offset': skip})
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/template/', params={'limit': limit, 'offset': skip}, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -172,7 +193,7 @@ class AMcardsClient:
         templates_json = res.json().get('objects', [])
         return [Template._from_json(template_json) for template_json in templates_json]
 
-    def template(self, id: str | int) -> Template:
+    def template(self, id: str | int, *, timeout: Timeout = None) -> Template:
         """Fetches client's AMcards template with a specified id.
 
         :param str or int id: Unique id for the :py:class:`template <amcards.models.Template>` you are fetching.
@@ -183,8 +204,10 @@ class AMcardsClient:
         :raises ForbiddenTemplateError: When the template for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/template/{id}/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/template/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenTemplateError('The template for the specified id either does not exist or is not owned by the client\'s user')
@@ -193,7 +216,7 @@ class AMcardsClient:
         template_json = res.json()
         return Template._from_json(template_json)
 
-    def quicksends(self, limit: int = 25, skip: int = 0) -> List[Template]:
+    def quicksends(self, limit: int = 25, skip: int = 0, *, timeout: Timeout = None) -> List[Template]:
         """Fetches client's AMcards quicksend templates.
 
         :param int limit: Defaults to ``25``. Max number of quicksend templates to be fetched.
@@ -204,8 +227,10 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/quicksendtemplate/', headers=self._HEADERS, params={'limit': limit, 'offset': skip})
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/quicksendtemplate/', params={'limit': limit, 'offset': skip}, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -214,7 +239,7 @@ class AMcardsClient:
         templates_json = res.json().get('objects', [])
         return [Template._from_json(template_json) for template_json in templates_json]
 
-    def quicksend(self, id: str | int) -> Template:
+    def quicksend(self, id: str | int, *, timeout: Timeout = None) -> Template:
         """Fetches client's AMcards quicksend template with a specified id.
 
         :param str or int id: Unique id for the :py:class:`quicksend template <amcards.models.Template>` you are fetching.
@@ -225,8 +250,10 @@ class AMcardsClient:
         :raises ForbiddenTemplateError: When the quicksend template for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/quicksendtemplate/{id}/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/quicksendtemplate/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenTemplateError('The quicksend template for the specified id either does not exist or is not owned by the client\'s user')
@@ -235,7 +262,7 @@ class AMcardsClient:
         template_json = res.json()
         return Template._from_json(template_json)
 
-    def campaigns(self, limit: int = 25, skip: int = 0) -> List[Campaign]:
+    def campaigns(self, limit: int = 25, skip: int = 0, *, timeout: Timeout = None) -> List[Campaign]:
         """Fetches client's AMcards drip campaigns.
 
         :param int limit: Defaults to ``25``. Max number of drip campaigns to be fetched.
@@ -246,8 +273,10 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/campaign/', headers=self._HEADERS, params={'limit': limit, 'offset': skip})
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/campaign/', params={'limit': limit, 'offset': skip}, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -256,7 +285,7 @@ class AMcardsClient:
         campaigns_json = res.json().get('objects', [])
         return [Campaign._from_json(campaign_json) for campaign_json in campaigns_json]
 
-    def campaign(self, id: str | int) -> Campaign:
+    def campaign(self, id: str | int, *, timeout: Timeout = None) -> Campaign:
         """Fetches client's AMcards drip campaign with a specified id.
 
         :param str or int id: Unique id for the :py:class:`drip campaign <amcards.models.Campaign>` you are fetching.
@@ -267,8 +296,10 @@ class AMcardsClient:
         :raises ForbiddenCampaignError: When the drip campaign for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/campaign/{id}/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/campaign/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenCampaignError('The drip campaign for the specified id either does not exist or is not owned by the client\'s user')
@@ -277,7 +308,7 @@ class AMcardsClient:
         campaign_json = res.json()
         return Campaign._from_json(campaign_json)
 
-    def cards(self, limit: int = 25, skip: int = 0, filters: dict = None) -> List[Card]:
+    def cards(self, limit: int = 25, skip: int = 0, filters: dict = None, *, timeout: Timeout = None) -> List[Card]:
         """Fetches client's AMcards cards.
 
         :param int limit: Defaults to ``25``. Max number of cards to be fetched.
@@ -291,13 +322,15 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         params = {
             'limit': limit,
             'offset': skip,
         } | (filters or {})
 
-        res = requests.get(url=f'{DOMAIN}/.api/v1/card/', headers=self._HEADERS, params=params)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/card/', params=params, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -306,7 +339,7 @@ class AMcardsClient:
         cards_json = res.json().get('objects', [])
         return [Card._from_json(card_json) for card_json in cards_json]
 
-    def card(self, id: str | int) -> Card:
+    def card(self, id: str | int, *, timeout: Timeout = None) -> Card:
         """Fetches client's AMcards card with a specified id.
 
         :param str or int id: Unique id for the :py:class:`card <amcards.models.Card>` you are fetching.
@@ -317,8 +350,10 @@ class AMcardsClient:
         :raises ForbiddenCardError: When the card for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/card/{id}/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/card/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenCardError('The card for the specified id either does not exist or is not owned by the client\'s user')
@@ -327,7 +362,7 @@ class AMcardsClient:
         card_json = res.json()
         return Card._from_json(card_json)
 
-    def card_count(self, filters: dict = None) -> int:
+    def card_count(self, filters: dict = None, *, timeout: Timeout = None) -> int:
         """Fetches count of client's AMcards cards.
 
         :param Optional[dict] filters: Defaults to ``None``. Filters to be applied when counting cards.
@@ -339,12 +374,14 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         params = {
             'limit': 1,
         } | (filters or {})
 
-        res = requests.get(url=f'{DOMAIN}/.api/v1/card/', headers=self._HEADERS, params=params)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/card/', params=params, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
@@ -352,7 +389,7 @@ class AMcardsClient:
 
         return res.json()['meta']['total_count']
 
-    def mailing(self, id: str | int) -> Mailing:
+    def mailing(self, id: str | int, *, timeout: Timeout = None) -> Mailing:
         """Fetches client's AMcards mailing with a specified id.
 
         :param str or int id: Unique id for the :py:class:`mailing <amcards.models.Mailing>` you are fetching.
@@ -363,8 +400,10 @@ class AMcardsClient:
         :raises ForbiddenMailingError: When the mailing for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/mailing/{id}/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/mailing/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenMailingError('The mailing for the specified id either does not exist or is not owned by the client\'s user')
@@ -373,7 +412,7 @@ class AMcardsClient:
         mailing_json = res.json()
         return Mailing._from_json(mailing_json)
 
-    def contacts(self, limit: int = 25, skip: int = 0, filters: dict = None) -> List[Contact]:
+    def contacts(self, limit: int = 25, skip: int = 0, filters: dict = None, *, timeout: Timeout = None) -> List[Contact]:
         """Fetches client's AMcards contacts.
 
         :param int limit: Defaults to ``25``. Max number of contacts to be fetched.
@@ -387,20 +426,22 @@ class AMcardsClient:
 
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         params = {
             'limit': limit,
             'offset': skip,
         } | (filters or {})
 
-        res = requests.get(url=f'{DOMAIN}/.api/v1/contact/', headers=self._HEADERS, params=params)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/contact/', params=params, timeout=timeout)
         if not res.ok:
             raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
 
         contacts_json = res.json().get('objects', [])
         return [Contact._from_json(contact_json) for contact_json in contacts_json]
 
-    def contact(self, id: str | int) -> Contact:
+    def contact(self, id: str | int, *, timeout: Timeout = None) -> Contact:
         """Fetches client's AMcards contact with a specified id.
 
         :param str or int id: Unique id for the :py:class:`contact <amcards.models.Contact>` you are fetching.
@@ -411,8 +452,10 @@ class AMcardsClient:
         :raises ForbiddenContactError: When the contact for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.get(url=f'{DOMAIN}/.api/v1/contact/{id}/', headers=self._HEADERS)
+        res = self._request('GET', url=f'{DOMAIN}/.api/v1/contact/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenContactError('The contact for the specified id either does not exist or is not owned by the client\'s user')
@@ -440,6 +483,8 @@ class AMcardsClient:
         anniversary_year: Optional[str] = None,
         anniversary_month: Optional[str] = None,
         anniversary_day: Optional[str] = None,
+        *,
+        timeout: Timeout = None,
     ) -> None:
         """Creates a new contact for the client.
 
@@ -464,8 +509,10 @@ class AMcardsClient:
         :raises AMcardsException: When something unexpected occurs.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        user_id = self.user().id
+        user_id = self.user(timeout=timeout).id
         body = {
             'first_name': first_name,
             'last_name': last_name,
@@ -490,13 +537,13 @@ class AMcardsClient:
         if anniversary_month is not None: body |= {'anniversary_month': anniversary_month}
         if anniversary_day is not None: body |= {'anniversary_day': anniversary_day}
 
-        res = requests.post(url=f'{DOMAIN}/.api/v1/contact/', json=body, headers=self._HEADERS)
+        res = self._request('POST', url=f'{DOMAIN}/.api/v1/contact/', json=body, timeout=timeout)
         if not res.ok:
             if res.status_code == 401:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
             raise exceptions.AMcardsException('Something went wrong when trying to create a contact')
 
-    def delete_contact(self, id: str | int) -> None:
+    def delete_contact(self, id: str | int, *, timeout: Timeout = None) -> None:
         """Deletes client's AMcards contact with a specified id.
 
         :param str or int id: Unique id for the :py:class:`contact <amcards.models.Contact>` you are deleting.
@@ -504,8 +551,10 @@ class AMcardsClient:
         :raises ForbiddenContactError: When the contact for the specified ``id`` either does not exist or is not owned by the client's user.
         :raises AuthenticationError: When the client's ``access_token`` is invalid.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
-        res = requests.delete(url=f'{DOMAIN}/.api/v1/contact/{id}/', headers=self._HEADERS)
+        res = self._request('DELETE', url=f'{DOMAIN}/.api/v1/contact/{id}/', timeout=timeout)
         if not res.ok:
             if res.status_code in (403, 404):
                 raise exceptions.ForbiddenContactError('The contact for the specified id either does not exist or is not owned by the client\'s user')
@@ -517,6 +566,8 @@ class AMcardsClient:
         shipping_address: dict,
         return_address: dict = None,
         send_date: str = None,
+        *,
+        timeout: Timeout = None,
     ) -> int:
         """Get cost for a card send. Without actually sending the card.
 
@@ -580,6 +631,8 @@ class AMcardsClient:
         :raises ShippingAddressError: When ``shipping_address`` is missing some `required` keys.
         :raises DateFormatError: When one of the dates provided is not in ``"YYYY-MM-DD"`` format.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         # Validate shipping address
         missings = helpers.get_missing_required_shipping_address_fields(shipping_address)
@@ -599,7 +652,7 @@ class AMcardsClient:
             # prefix return address fields with return_
             return_address = {f'return_{key}': value for key, value in return_address.items()}
 
-        user = self.user()
+        user = self.user(timeout=timeout)
         shipping_country = _fix_country(shipping_address['country'])
         return_country = _fix_country(user.country)
         if return_address is not None and 'return_country' in return_address:
@@ -620,6 +673,8 @@ class AMcardsClient:
         send_date: str = None,
         message: str = None,
         extra_data: dict = None,
+        *,
+        timeout: Timeout = None,
     ) -> CardResponse:
         """Attempt to send a card.
 
@@ -704,6 +759,8 @@ class AMcardsClient:
         :raises DateFormatError: When one of the dates provided is not in ``"YYYY-MM-DD"`` format.
         :raises InsufficientCreditsError: When the client's user has insufficient credits in their balance.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         # Validate shipping address
         missings = helpers.get_missing_required_shipping_address_fields(shipping_address)
@@ -744,7 +801,7 @@ class AMcardsClient:
         if extra_data is not None:
             body |= {'extra_data': extra_data}
 
-        res = requests.post(f'{DOMAIN}/cards/open-card-form-oa/', json=body, headers=self._HEADERS)
+        res = self._request('POST', f'{DOMAIN}/cards/open-card-form-oa/', json=body, timeout=timeout)
 
         # Check for errors
         match res.status_code:
@@ -768,6 +825,8 @@ class AMcardsClient:
         shipping_address: dict,
         return_address: dict = None,
         send_date: str = None,
+        *,
+        timeout: Timeout = None,
     ) -> int:
         """Get cost for a campaign send. Without actually sending the campaign.
 
@@ -835,6 +894,8 @@ class AMcardsClient:
         :raises DateFormatError: When one of the dates provided is not in ``"YYYY-MM-DD"`` format.
         :raises PhoneFormatError: When the ``phone_number`` is not a digit string of length 10.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         # Validate shipping address
         missings = helpers.get_missing_required_shipping_address_fields(shipping_address)
@@ -883,7 +944,7 @@ class AMcardsClient:
             body['recipients'][0]['birth_day'] = shipping_address['birth_date'][-2:]
             body['recipients'][0]['birth_month'] = shipping_address['birth_date'][-5:-3]
 
-        res = requests.post(f'{DOMAIN}/campaigns/calculate-campaign-price/', json=body, headers=self._HEADERS)
+        res = self._request('POST', f'{DOMAIN}/campaigns/calculate-campaign-price/', json=body, timeout=timeout)
 
         # Check for errors
         match res.status_code:
@@ -903,6 +964,8 @@ class AMcardsClient:
         send_date: str = None,
         extra_data: dict = None,
         bypass_duplicate_check: bool = False,
+        *,
+        timeout: Timeout = None,
     ) -> CampaignResponse:
         """Attempt to send a drip campaign.
 
@@ -992,6 +1055,8 @@ class AMcardsClient:
         :raises InsufficientCreditsError: When the client's user has insufficient credits in their balance.
         :raises DuplicateCampaignError: When AMcards detects this :py:class:`campaign <amcards.models.Campaign>` specified by ``campaign_id`` is a duplicate and ``send_if_duplicate`` in :py:class:`Campaign <amcards.models.Campaign>` is ``False``.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         # Validate shipping address
         missings = helpers.get_missing_required_shipping_address_fields(shipping_address)
@@ -1044,7 +1109,7 @@ class AMcardsClient:
         if bypass_duplicate_check:
             body |= {'bypass_duplicate_check': True}
 
-        res = requests.post(f'{DOMAIN}/campaigns/open-campaign-form/', json=body, headers=self._HEADERS)
+        res = self._request('POST', f'{DOMAIN}/campaigns/open-campaign-form/', json=body, timeout=timeout)
 
         # Check for errors
         match res.status_code:
@@ -1069,6 +1134,8 @@ class AMcardsClient:
         campaign_id: str | int,
         initiator: str,
         contacts: List[dict],
+        *,
+        timeout: Timeout = None,
     ) -> CampaignMultiResponse:
         """Attempt to send a drip campaign to multiple contacts.
 
@@ -1144,6 +1211,8 @@ class AMcardsClient:
         :raises ShippingAddressError: When none of the provided contacts are valid after validation. Contacts missing required fields or with invalid optional fields are skipped.
         :raises InsufficientCreditsError: When the client's user has insufficient credits in their balance.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         contacts_to_send = []
 
@@ -1181,7 +1250,7 @@ class AMcardsClient:
             'contacts': valid_contacts,
         }
 
-        res = requests.post(f'{DOMAIN}/campaigns/open-campaign-multi-form/', json=body, headers=self._HEADERS)
+        res = self._request('POST', f'{DOMAIN}/campaigns/open-campaign-multi-form/', json=body, timeout=timeout)
 
         # Check for errors
         match res.status_code:
@@ -1203,6 +1272,8 @@ class AMcardsClient:
         return_address: dict = None,
         send_date: str = None,
         send_if_error: bool = False,
+        *,
+        timeout: Timeout = None,
     ) -> CardsResponse:
         """Attempt to send multiple cards.
 
@@ -1302,6 +1373,8 @@ class AMcardsClient:
         :raises DateFormatError: When one of the dates provided is not in ``"YYYY-MM-DD"`` format.
         :raises InsufficientCreditsError: When the client's user has insufficient credits in their balance.
 
+        :param timeout: Optional connect/read timeout override for this operation. ``None`` uses the client timeout.
+
         """
         # Validate shipping addresses
         for idx, shipping_address in enumerate(shipping_addresses):
@@ -1340,7 +1413,7 @@ class AMcardsClient:
         if send_date is not None:
             body |= {'send_type': 'specific_date', 'send_date': send_date}
 
-        res = requests.post(f'{DOMAIN}/cards/open-mailing-form/', json=body, headers=self._HEADERS)
+        res = self._request('POST', f'{DOMAIN}/cards/open-mailing-form/', json=body, timeout=timeout)
 
         # Check for errors
         match res.status_code:
