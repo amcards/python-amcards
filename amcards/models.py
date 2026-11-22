@@ -384,6 +384,7 @@ class Card:
         return_address: dict,
         gifts: List[Gift],
         extra_data: dict,
+        tracking_id: Optional[str] = None,
     ) -> None:
         self._id = id
         self._amount_charged = amount_charged
@@ -402,6 +403,7 @@ class Card:
         self._return_address = return_address
         self._gifts = gifts
         self._extra_data = extra_data
+        self._tracking_id = tracking_id
 
     __repr__ = helpers.repr
 
@@ -532,6 +534,11 @@ class Card:
         """Extra data attached to this card."""
         return self._extra_data
 
+    @property
+    def tracking_id(self) -> Optional[str]:
+        """Shipment tracking identifier, or ``None`` when none is available."""
+        return self._tracking_id
+
     @classmethod
     def _from_json(cls, json: dict):
         return cls(
@@ -557,6 +564,7 @@ class Card:
                 shipping_and_handling_cost=gift['shipping_and_handling'],
             ) for gift in json['gifts']],
             extra_data=ast.literal_eval(json.get('extra_data') or '{}'),
+            tracking_id=json.get('tracking_id') or None,
         )
 
 class MailingStatus(Enum):
