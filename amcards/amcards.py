@@ -336,7 +336,10 @@ class AMcardsClient:
                 raise exceptions.AuthenticationError('Access token provided to client is unauthorized')
             raise exceptions.AMcardsException(f'Something went wrong when fetching cards. AMcards Status Code: {res.status_code}, AMcards Body: {res.text}.')
 
-        cards_json = res.json().get('objects', [])
+        payload = res.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get('objects'), list) or not isinstance(payload.get('meta'), dict) or 'next' not in payload['meta']:
+            raise exceptions.AMcardsException('Invalid card list response')
+        cards_json = payload['objects']
         return [Card._from_json(card_json) for card_json in cards_json]
 
     def card(self, id: str | int, *, timeout: Timeout = None) -> Card:
