@@ -28,6 +28,7 @@ class User:
         international_postage_cost: int,
         domestic_postage_countries: set,
         greeting_card_cost: int,
+        monthly_report_emails: List[str],
     ) -> None:
         self._id = id
         self._first_name = first_name
@@ -46,6 +47,7 @@ class User:
         self._international_postage_cost = international_postage_cost
         self._domestic_postage_countries = domestic_postage_countries
         self._greeting_card_cost = greeting_card_cost
+        self._monthly_report_emails = monthly_report_emails
 
     __repr__ = helpers.repr
 
@@ -135,6 +137,11 @@ class User:
         """User's base cost of a greeting card excluding postage."""
         return self._greeting_card_cost
 
+    @property
+    def monthly_report_emails(self) -> List[str]:
+        """Email addresses that receive monthly reports."""
+        return self._monthly_report_emails
+
     @classmethod
     def _from_json(cls, json: dict):
         user_id = json['resource_uri']
@@ -157,7 +164,8 @@ class User:
             domestic_postage_cost=json['postage']['domestic_cost'],
             international_postage_cost=json['postage']['international_cost'],
             domestic_postage_countries=set(json['postage']['domestic_countries']),
-            greeting_card_cost=json['product_pricing_info']['5x7greetingcard']
+            greeting_card_cost=json['product_pricing_info']['5x7greetingcard'],
+            monthly_report_emails=(json.get('monthly_report_emails') or []),
         )
 
 class Gift:
@@ -376,6 +384,7 @@ class Card:
         return_address: dict,
         gifts: List[Gift],
         extra_data: dict,
+        tracking_id: Optional[str] = None,
     ) -> None:
         self._id = id
         self._amount_charged = amount_charged
@@ -394,6 +403,7 @@ class Card:
         self._return_address = return_address
         self._gifts = gifts
         self._extra_data = extra_data
+        self._tracking_id = tracking_id
 
     __repr__ = helpers.repr
 
@@ -524,6 +534,11 @@ class Card:
         """Extra data attached to this card."""
         return self._extra_data
 
+    @property
+    def tracking_id(self) -> Optional[str]:
+        """Shipment tracking identifier, or ``None`` when none is available."""
+        return self._tracking_id
+
     @classmethod
     def _from_json(cls, json: dict):
         return cls(
@@ -549,6 +564,7 @@ class Card:
                 shipping_and_handling_cost=gift['shipping_and_handling'],
             ) for gift in json['gifts']],
             extra_data=ast.literal_eval(json.get('extra_data') or '{}'),
+            tracking_id=json.get('tracking_id') or None,
         )
 
 class MailingStatus(Enum):
